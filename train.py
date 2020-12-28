@@ -3,7 +3,6 @@ import numpy as np
 import pandas as pd
 from deepctr.feature_column import SparseFeat, DenseFeat, get_feature_names
 from deepctr.models import DeepFM
-from sklearn.metrics import log_loss, roc_auc_score
 from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.utils import Sequence
 from conf import TARGET, DENSE_FEATURES, SPARSE_FEATURES, FILE_ROWS,\
@@ -38,8 +37,9 @@ class DataGenerator(Sequence):
             df[DENSE_FEATURES] = self.minmax_scaler.transform(
                 df[DENSE_FEATURES])
             df[DENSE_FEATURES] = df[DENSE_FEATURES].fillna(0)
+            df[SPARSE_FEATURES] = df[SPARSE_FEATURES].fillna('')
             df[SPARSE_FEATURES] = self.ordinal_encoder.transform(
-                df[SPARSE_FEATURES]).fillna(0).astype(np.uint32)
+                df[SPARSE_FEATURES]) + 1
 
             self.X = df[DENSE_FEATURES + SPARSE_FEATURES]
             self.y = df[[TARGET]]
@@ -54,11 +54,11 @@ class DataGenerator(Sequence):
 
 
 def train():
-    minmax_scaler = joblib.load('./minmax_scaler')
-    ordinal_encoder = joblib.load('./ordinal_encoder')
+    minmax_scaler = joblib.load('./output/minmax_scaler')
+    ordinal_encoder = joblib.load('./output/ordinal_encoder')
 
     feature_columns = [SparseFeat(
-        x, vocabulary_size=ordinal_encoder.mapping[i]['mapping'].max() + 1,
+        x, vocabulary_size=ordinal_encoder.categories_[i].shape[0] + 1,
         embedding_dim=10) for i, x in enumerate(SPARSE_FEATURES)
     ] + [DenseFeat(x, dimension=1) for x in DENSE_FEATURES]
 
