@@ -1,15 +1,14 @@
 import joblib
 import numpy as np
 import pandas as pd
+import tensorflow as tf
 from deepctr.feature_column import SparseFeat, DenseFeat, get_feature_names
 from deepctr.models import DeepFM
-from tensorflow.keras.callbacks import EarlyStopping
-from tensorflow.keras.utils import Sequence
 from conf import TARGET, DENSE_FEATURES, SPARSE_FEATURES, FILE_ROWS,\
-    TRAIN_FILES, VALID_FILES, BATCH_SIZE, EPOCHS, EARLY_STOP
+    TRAIN_FILES, VALID_FILES, RANDOM_SEED, BATCH_SIZE, EPOCHS, EARLY_STOP
 
 
-class DataGenerator(Sequence):
+class DataGenerator(tf.keras.utils.Sequence):
 
     def __init__(self, files, feature_names, minmax_scaler, ordinal_encoder,
                  shuffle=True):
@@ -62,8 +61,15 @@ def train():
         embedding_dim=10) for i, x in enumerate(SPARSE_FEATURES)
     ] + [DenseFeat(x, dimension=1) for x in DENSE_FEATURES]
 
-    model = DeepFM(feature_columns, feature_columns, task='binary')
-    model.compile("adam", "binary_crossentropy")
+    if RANDOM_SEED:
+        seed = RANDOM_SEED
+        np.random.seed(seed)
+        tf.random.set_seed(seed)
+    else:
+        seed = np.random.randint(0, 1e10)
+
+    model = DeepFM(feature_columns, feature_columns, task='binary', seed=seed)
+    model.compile('adam', 'binary_crossentropy', metrics=['AUC'])
 
     feature_names = get_feature_names(feature_columns)
     train_data = DataGenerator(
@@ -71,9 +77,11 @@ def train():
     valid_data = DataGenerator(
         VALID_FILES, feature_names, minmax_scaler, ordinal_encoder, False)
 
-    early_stop = EarlyStopping(patience=EARLY_STOP, restore_best_weights=True)
+    early_stop = tf.keras.callbacks.EarlyStopping(
+        patience=EARLY_STOP, restore_best_weights=True)
     model.fit(train_data, batch_size=BATCH_SIZE, epochs=EPOCHS,
               validation_data=valid_data, callbacks=[early_stop])
+    model.save('./output/model.h5')
 
 
 if __name__ == '__main__':
