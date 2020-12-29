@@ -16,19 +16,18 @@ class DataGenerator(tf.keras.utils.Sequence):
         self.feature_names = feature_names
         self.minmax_scaler = minmax_scaler
         self.ordinal_encoder = ordinal_encoder
+        self.file = None
         self.X = None
         self.y = None
-        self.indexes = np.arange(len(self.files))
         self.shuffle = shuffle
 
     def __len__(self):
         return len(self.files) * FILE_ROWS // BATCH_SIZE
 
     def __getitem__(self, index):
-        start = index * BATCH_SIZE % FILE_ROWS
-        if start == 0:
-            file = self.files[self.indexes[index * BATCH_SIZE // FILE_ROWS]]
-            print(f'\nread file: {file}\n')
+        file = self.files[index * BATCH_SIZE // FILE_ROWS]
+        if self.file != file:
+            self.file = file
             df = pd.read_csv(
                 file, delimiter='\t', header=None, nrows=FILE_ROWS,
                 names=[TARGET] + DENSE_FEATURES + SPARSE_FEATURES)
@@ -43,6 +42,11 @@ class DataGenerator(tf.keras.utils.Sequence):
             self.X = df[DENSE_FEATURES + SPARSE_FEATURES]
             self.y = df[[TARGET]]
 
+            self.indexes = np.arange(FILE_ROWS // BATCH_SIZE)
+            if self.shuffle:
+                np.random.shuffle(self.indexes)
+
+        start = self.indexes[index % (FILE_ROWS // BATCH_SIZE)] * BATCH_SIZE
         X = self.X.iloc[start:start + BATCH_SIZE, :]
         y = self.y.iloc[start:start + BATCH_SIZE, :]
         return [X[name].values for name in self.feature_names], y.values
@@ -79,8 +83,8 @@ def train():
 
     early_stop = tf.keras.callbacks.EarlyStopping(
         patience=EARLY_STOP, restore_best_weights=True)
-    model.fit(train_data, batch_size=BATCH_SIZE, epochs=EPOCHS,
-              validation_data=valid_data, callbacks=[early_stop])
+    model.fit(train_data, validation_data=valid_data, callbacks=[early_stop],
+              shuffle=False, batch_size=BATCH_SIZE, epochs=EPOCHS)
     model.save('./output/model.h5')
 
 
