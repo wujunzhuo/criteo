@@ -2,10 +2,10 @@ import joblib
 import numpy as np
 import pandas as pd
 import tensorflow as tf
+from absl.flags import FLAGS
 from deepctr.feature_column import SparseFeat, DenseFeat, get_feature_names
+from deepctr.layers import custom_objects
 from deepctr.models import DeepFM
-from conf import TARGET, DENSE_FEATURES, SPARSE_FEATURES, FILE_ROWS,\
-    TRAIN_FILES, VALID_FILES, RANDOM_SEED, BATCH_SIZE, EPOCHS, EARLY_STOP
 
 
 class DataGenerator(tf.keras.utils.Sequence):
@@ -22,33 +22,32 @@ class DataGenerator(tf.keras.utils.Sequence):
         self.shuffle = shuffle
 
     def __len__(self):
-        return len(self.files) * FILE_ROWS // BATCH_SIZE
+        return len(self.files) * FLAGS.file_rows // FLAGS.batch_size
 
     def __getitem__(self, index):
-        file = self.files[index * BATCH_SIZE // FILE_ROWS]
+        file = self.files[index * FLAGS.batch_size // FLAGS.file_rows]
         if self.file != file:
             self.file = file
             df = pd.read_csv(
-                file, delimiter='\t', header=None, nrows=FILE_ROWS,
-                names=[TARGET] + DENSE_FEATURES + SPARSE_FEATURES)
+                file, delimiter='\t', header=None, nrows=FLAGS.file_rows,
+                names=[FLAGS.target] + FLAGS.dense_feat + FLAGS.sparse_feat)
 
-            df[DENSE_FEATURES] = self.minmax_scaler.transform(
-                df[DENSE_FEATURES])
-            df[DENSE_FEATURES] = df[DENSE_FEATURES].fillna(0)
-            df[SPARSE_FEATURES] = df[SPARSE_FEATURES].fillna('')
-            df[SPARSE_FEATURES] = self.ordinal_encoder.transform(
-                df[SPARSE_FEATURES]) + 1
+            df[FLAGS.dense_feat] = self.minmax_scaler.transform(
+                df[FLAGS.dense_feat].fillna(0))
+            df[FLAGS.sparse_feat] = self.ordinal_encoder.transform(
+                df[FLAGS.sparse_feat].fillna('')) + 1
 
-            self.X = df[DENSE_FEATURES + SPARSE_FEATURES]
-            self.y = df[[TARGET]]
+            self.X = df[FLAGS.dense_feat + FLAGS.sparse_feat]
+            self.y = df[[FLAGS.target]]
 
-            self.indexes = np.arange(FILE_ROWS // BATCH_SIZE)
+            self.indexes = np.arange(FLAGS.file_rows // FLAGS.batch_size)
             if self.shuffle:
                 np.random.shuffle(self.indexes)
 
-        start = self.indexes[index % (FILE_ROWS // BATCH_SIZE)] * BATCH_SIZE
-        X = self.X.iloc[start:start + BATCH_SIZE, :]
-        y = self.y.iloc[start:start + BATCH_SIZE, :]
+        start = self.indexes[
+            index % (FLAGS.file_rows // FLAGS.batch_size)] * FLAGS.batch_size
+        X = self.X.iloc[start:start + FLAGS.batch_size, :]
+        y = self.y.iloc[start:start + FLAGS.batch_size, :]
         return [X[name].values for name in self.feature_names], y.values
 
     def on_epoch_end(self):
@@ -56,37 +55,38 @@ class DataGenerator(tf.keras.utils.Sequence):
             np.random.shuffle(self.indexes)
 
 
-def train():
+def main():
     minmax_scaler = joblib.load('./output/minmax_scaler')
     ordinal_encoder = joblib.load('./output/ordinal_encoder')
 
     feature_columns = [SparseFeat(
         x, vocabulary_size=ordinal_encoder.categories_[i].shape[0] + 1,
-        embedding_dim=10) for i, x in enumerate(SPARSE_FEATURES)
-    ] + [DenseFeat(x, dimension=1) for x in DENSE_FEATURES]
+        embedding_dim=10) for i, x in enumerate(FLAGS.sparse_feat)
+    ] + [DenseFeat(x, dimension=1) for x in FLAGS.dense_feat]
 
-    if RANDOM_SEED:
-        seed = RANDOM_SEED
+    if FLAGS.random_seed:
+        seed = FLAGS.random_seed
         np.random.seed(seed)
         tf.random.set_seed(seed)
     else:
         seed = np.random.randint(0, 1e10)
 
-    model = DeepFM(feature_columns, feature_columns, task='binary', seed=seed)
-    model.compile('adam', 'binary_crossentropy', metrics=['AUC'])
+    if FLAGS.continue_train:
+        model = tf.keras.models.load_model('./output/model', custom_objects)
+    else:
+        model = DeepFM(
+            feature_columns, feature_columns, task='binary', seed=seed)
+        model.compile('adam', 'binary_crossentropy', metrics=['AUC'])
 
     feature_names = get_feature_names(feature_columns)
     train_data = DataGenerator(
-        TRAIN_FILES, feature_names, minmax_scaler, ordinal_encoder)
+        FLAGS.train_files, feature_names, minmax_scaler, ordinal_encoder)
     valid_data = DataGenerator(
-        VALID_FILES, feature_names, minmax_scaler, ordinal_encoder, False)
+        FLAGS.valid_files, feature_names, minmax_scaler, ordinal_encoder,
+        False)
 
     early_stop = tf.keras.callbacks.EarlyStopping(
-        patience=EARLY_STOP, restore_best_weights=True)
+        patience=FLAGS.early_stop, restore_best_weights=True)
     model.fit(train_data, validation_data=valid_data, callbacks=[early_stop],
-              shuffle=False, batch_size=BATCH_SIZE, epochs=EPOCHS)
-    model.save('./output/model.h5')
-
-
-if __name__ == '__main__':
-    train()
+              shuffle=False, batch_size=FLAGS.batch_size, epochs=FLAGS.epochs)
+    model.save('./output/model')

@@ -1,29 +1,28 @@
 import joblib
 import numpy as np
 import pandas as pd
+from absl.flags import FLAGS
 from sklearn.preprocessing import MinMaxScaler, OrdinalEncoder
-from conf import TARGET, DENSE_FEATURES, SPARSE_FEATURES, FILE_ROWS,\
-    TRAIN_FILES
 
 
-def transform():
-    minmaxs = [[float('inf'), float('-inf')] for _ in DENSE_FEATURES]
-    vocabs = [set(['']) for _ in SPARSE_FEATURES]
+def main():
+    minmaxs = [[float('inf'), float('-inf')] for _ in FLAGS.dense_feat]
+    vocabs = [set(['']) for _ in FLAGS.sparse_feat]
 
-    for file in TRAIN_FILES:
+    for file in FLAGS.train_files:
         print(f'process file: {file}')
         data = pd.read_csv(
-            file, delimiter='\t', header=None, nrows=FILE_ROWS,
-            names=[TARGET] + DENSE_FEATURES + SPARSE_FEATURES)
+            file, delimiter='\t', header=None, nrows=FLAGS.file_rows,
+            names=[FLAGS.target] + FLAGS.dense_feat + FLAGS.sparse_feat)
 
-        data[DENSE_FEATURES] = data[DENSE_FEATURES].fillna(0)
-        data[SPARSE_FEATURES] = data[SPARSE_FEATURES].fillna('')
+        data[FLAGS.dense_feat] = data[FLAGS.dense_feat].fillna(0)
+        data[FLAGS.sparse_feat] = data[FLAGS.sparse_feat].fillna('')
 
-        for col, minmax in zip(DENSE_FEATURES, minmaxs):
+        for col, minmax in zip(FLAGS.dense_feat, minmaxs):
             minmax[0] = min(minmax[0], data[col].min())
             minmax[1] = max(minmax[1], data[col].max())
 
-        for col, vocab in zip(SPARSE_FEATURES, vocabs):
+        for col, vocab in zip(FLAGS.sparse_feat, vocabs):
             vocab.update(data[col].unique())
 
     minmax_scaler = MinMaxScaler()
@@ -36,7 +35,3 @@ def transform():
     vocabs = vocabs.fillna('')
     ordinal_encoder.fit(vocabs)
     joblib.dump(ordinal_encoder, './output/ordinal_encoder')
-
-
-if __name__ == '__main__':
-    transform()
